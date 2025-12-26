@@ -4,15 +4,14 @@ Follow these steps to get the project running locally after cloning.
 
 ---
 
-## 1. Clone the repository
 
-## 2. Install PHP dependencies
+## 1. Install PHP dependencies
 
 ```bash
 composer install
 ```
 
-## 3. Copy and configure environment file
+## 2. Copy and configure environment file
 
 ```bash
 cp .env.example .env
@@ -25,25 +24,25 @@ DB_USERNAME=your_username
 DB_PASSWORD=your_password
 ```
 
-## 4. Generate application key
+## 3. Generate application key
 
 ```bash
 php artisan key:generate
 ```
 
-## 5. Run Migrations and seeders
+## 4. Run Migrations and seeders
 
 ```bash
 php artisan migrate --seed
 ```
 
-## 6. Start the Laravel server
+## 5. Start the Laravel server
 
 ```bash
 php artisan serve
 ```
 
-## 7. Route Lists.
+## 6. Route Lists.
 
 ```bash
   GET|HEAD  / ..........................................................................generated::bOQujdmTBarqShrR
