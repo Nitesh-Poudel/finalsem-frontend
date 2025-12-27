@@ -89,7 +89,7 @@ Route::get('/orders/status/{id}', [OrderController::class, 'orderStats'])->where
 Route::get('/orders/status/{status}', [OrderController::class, 'getOrderByStatus'])->where('status', '[a-zA-Z]+');
 Route::get('/orders/stats',  [OrderController::class, 'orderStatisticsOverall']);
 Route::get('/orders/{id}', [OrderController::class, 'show']);
-Route::post('/orders', [OrderController::class, 'store']);
+Route::middleware('optional.auth')->post('/orders', [OrderController::class, 'store']);
 Route::put('/orders/{id}', [OrderController::class, 'update']);
 Route::delete('/orders/{id}', [OrderController::class, 'destroy']);
 Route::get('/orders/monthly/data', [OrderController::class, 'monthlyOrderStats']);
@@ -131,3 +131,4 @@ Route::delete('/kitchen/logs/{id}', [KitchenLogController::class, 'destroy']);
 //user related
 // Route::get('/user/orders/history',[OrderController::class,'getOrderHistory']);
 Route::middleware('auth:sanctum')->get('/user/orders/history', [OrderController::class,'getOrderHistory']);
+Route::middleware('auth:sanctum')->get('/order/track',[OrderController::class,'getOrderTrack']);

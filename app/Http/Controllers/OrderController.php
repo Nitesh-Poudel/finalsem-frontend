@@ -10,33 +10,37 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\DeliveryController;
 
 class OrderController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    protected $deliveryController;
+
+    public function __construct(DeliveryController $deliveryController)
     {
-        // Load orderItems and their product details
-        return Order::with(['orderItems.product'])->get();
+        $this->deliveryController = $deliveryController;
     }
 
 
-    /**
-     * Store a newly created resource in storage.
-     */
+
+    public function index()
+    {
+        return Order::with(['orderItems.product'])->get();
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'table_number' => 'required|integer|min:1',
+            'table_number' => 'nullable|integer|min:1',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
+            'order_type' => 'required',
+            'delivery_info' => ''
         ]);
 
-
         DB::beginTransaction();
+
 
         try {
             $totalAmount = 0;
@@ -44,7 +48,10 @@ class OrderController extends Controller
             foreach ($validated['items'] as $item) {
                 $product = Product::find($item['product_id']);
                 if ($product->stock < $item['quantity']) {
-                    return response()->json("Not enough stock for item {$product->name}", 400);
+                   return response()->json([
+                        'success' => false,
+                        'message' => "{$product->name} is out of stock for the requested quantity."
+                    ], 400);
                 }
             }
 
@@ -58,8 +65,48 @@ class OrderController extends Controller
                     'table_number' => $validated['table_number'],
                     'status' => 'queued',
                     'total_amount' => 0,
+                    'user_id' => Auth::id()??null,
+                    'order_type' => $validated['order_type'],
                 ]);
             }
+
+            if ($request->order_type === 'remote-delivery') {
+                // $validationRules['delivery_info'] = 'required|array';
+                // $validationRules['delivery_info.use_current_location'] = 'required|boolean';
+                
+                // if ($request->input('delivery_info.use_current_location')) {
+                //     // GPS location validation
+                //     $validationRules['delivery_info.latitude'] = 'required|numeric|between:-90,90';
+                //     $validationRules['delivery_info.longitude'] = 'required|numeric|between:-180,180';
+                //     $validationRules['delivery_info.accuracy'] = 'nullable|numeric|min:0';
+                // } else {
+                //     // Manual address validation
+                //     $validationRules['delivery_info.ward_number'] = 'required|string|max:20';
+                //     $validationRules['delivery_info.tole'] = 'required|string|max:100';
+                //     $validationRules['delivery_info.city'] = 'required|string|in:Kathmandu';
+                //     $validationRules['delivery_info.district'] = 'required|string|in:Kathmandu';
+                //     $validationRules['delivery_info.province'] = 'required|string|in:Bagmati';
+                //     $validationRules['delivery_info.phone'] = [
+                //         'required',
+                //         'string',
+                //         'regex:/^(98|97|96)[0-9]{8}$/'
+                //     ];
+                //     $validationRules['delivery_info.landmark'] = 'nullable|string|max:500';
+                // }
+
+                    // In your store method, after creating the order:
+                    // if ($validated['order_type'] === 'remote-delivery') {
+                        // Create instance directly
+                        $deliveryController = new DeliveryController();
+                        
+                        // Call the method
+                        $delivery = $deliveryController->createDeliveryForOrder(
+                            $order, 
+                            $validated['delivery_info']
+                        );
+                    // }
+            }
+
 
             foreach ($validated['items'] as $item) {
                 $product = Product::find($item['product_id']);
@@ -123,7 +170,8 @@ class OrderController extends Controller
                         'total_product_price' => $originalPrice,
                         'discount' => $discountedPrice,
                         'grand_total' => $originalPrice - $discountedPrice,
-                        'offer_id' => $offer?->id
+                        'offer_id' => $offer?->id,
+                        
                     ]);
                 }
 
@@ -393,4 +441,48 @@ class OrderController extends Controller
                'orders' => OrderResource::collection($orders)
         ]);
     }
+
+public function getOrderTrack()
+{
+    $user = Auth::user(); 
+   
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'User not logged in'
+        ], 401);
+    }
+
+    // Get the last order of the logged-in user
+    $order = Order::with([
+        'orderItems.product:id,name,price,stock,category_id'
+    ])
+    ->where('user_id', $user->id)
+    ->latest() // order by created_at desc
+    ->first();
+
+    if (!$order) {
+        return response()->json(['message' => 'Order not found'], 404);
+    }
+
+    return response()->json([
+        'order_id' => $order->id,
+        'table_number' => $order->table_number,
+        'status' => $order->status,
+        'total_amount' => $order->total_amount,
+        'created_at' => $order->created_at->format('Y/m/d H:i'),
+        'order_items' => $order->orderItems->map(function ($item) {
+            return [
+                'product_id' => $item->product_id,
+                'product_name' => $item->product->name,
+                'unit_price' => $item->unit_price,
+                'quantity' => $item->quantity,
+                'total_product_price' => $item->total_product_price,
+                'discount' => $item->discount,
+                'grand_total' => $item->grand_total
+            ];
+        }),
+    ]);
+}
+
 }
