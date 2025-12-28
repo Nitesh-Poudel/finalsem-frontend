@@ -16,10 +16,6 @@ class DeliveryController extends Controller
     {
         
         DB::transaction(function () use ($order, $deliveryData) {
-            // Ensure delivery doesn't already exist for this order
-            // if ($order->delivery()->exists()) {
-            //     throw new \Exception('Delivery already exists for this order.');
-            // }
 
             // Prepare the delivery data
             $deliveryData['order_id'] = $order->id;
@@ -58,8 +54,13 @@ class DeliveryController extends Controller
                 unset($deliveryData['use_current_location']);
             }
 
-            // Create the delivery record
-            $delivery = Delivery::create($deliveryData);
+            $delivery = Delivery::updateOrCreate(
+                [
+                    'order_id' => $order->id 
+                ],
+                $deliveryData 
+            );
+
 
             return $delivery;
         });

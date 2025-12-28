@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\DeliveryController;
+use Exception; 
+
 
 class OrderController extends Controller
 {
@@ -20,8 +22,6 @@ class OrderController extends Controller
     {
         $this->deliveryController = $deliveryController;
     }
-
-
 
     public function index()
     {
@@ -36,11 +36,10 @@ class OrderController extends Controller
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
             'order_type' => 'required',
-            'delivery_info' => ''
+            'delivery_info' => 'nullable|array',
         ]);
 
         DB::beginTransaction();
-
 
         try {
             $totalAmount = 0;
@@ -59,7 +58,6 @@ class OrderController extends Controller
                 ->where('status', '!=', 'completed')
                 ->first();
 
-
             if (!$order) {
                 $order = Order::create([
                     'table_number' => $validated['table_number'],
@@ -71,42 +69,59 @@ class OrderController extends Controller
             }
 
             if ($request->order_type === 'remote-delivery') {
-                // $validationRules['delivery_info'] = 'required|array';
-                // $validationRules['delivery_info.use_current_location'] = 'required|boolean';
-                
-                // if ($request->input('delivery_info.use_current_location')) {
-                //     // GPS location validation
-                //     $validationRules['delivery_info.latitude'] = 'required|numeric|between:-90,90';
-                //     $validationRules['delivery_info.longitude'] = 'required|numeric|between:-180,180';
-                //     $validationRules['delivery_info.accuracy'] = 'nullable|numeric|min:0';
-                // } else {
-                //     // Manual address validation
-                //     $validationRules['delivery_info.ward_number'] = 'required|string|max:20';
-                //     $validationRules['delivery_info.tole'] = 'required|string|max:100';
-                //     $validationRules['delivery_info.city'] = 'required|string|in:Kathmandu';
-                //     $validationRules['delivery_info.district'] = 'required|string|in:Kathmandu';
-                //     $validationRules['delivery_info.province'] = 'required|string|in:Bagmati';
-                //     $validationRules['delivery_info.phone'] = [
-                //         'required',
-                //         'string',
-                //         'regex:/^(98|97|96)[0-9]{8}$/'
-                //     ];
-                //     $validationRules['delivery_info.landmark'] = 'nullable|string|max:500';
-                // }
+                if ($request->input('delivery_info.use_current_location')) {
+                    // GPS location validation
+                    $validationRules['delivery_info.latitude'] = 'required|numeric|between:-90,90';
+                    $validationRules['delivery_info.longitude'] = 'required|numeric|between:-180,180';
+                    $validationRules['delivery_info.accuracy'] = 'nullable|numeric|min:0';
 
-                    // In your store method, after creating the order:
-                    // if ($validated['order_type'] === 'remote-delivery') {
-                        // Create instance directly
-                        $deliveryController = new DeliveryController();
-                        
-                        // Call the method
-                        $delivery = $deliveryController->createDeliveryForOrder(
-                            $order, 
-                            $validated['delivery_info']
-                        );
-                    // }
+                    $restaurantLat = 28.2096; // Pokhara latitude
+                    $restaurantLng = 83.9856; // Pokhara longitude
+
+
+                    $customerLat = $request->input('delivery_info.latitude');
+                    $customerLng = $request->input('delivery_info.longitude');
+
+                 
+                    
+                    $distance = $this->calculateDistance(
+                        $restaurantLat, 
+                        $restaurantLng, 
+                        $customerLat, 
+                        $customerLng
+                    );
+                    if ($distance > 200000) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Delivery is only available within 2km radius from our restaurant.',
+                            'distance' => round($distance, 2) . ' meters',
+                            'max_allowed' => '2000 meters'
+                        ], 400);
+                    }
+
+
+
+                } else {
+                    // Manual address validation (currently commented out)
+                    // $validationRules['delivery_info.ward_number'] = 'required|string|max:20';
+                    // $validationRules['delivery_info.tole'] = 'required|string|max:100';
+                    // $validationRules['delivery_info.city'] = 'required|string|in:Kathmandu';
+                    // $validationRules['delivery_info.district'] = 'required|string|in:Kathmandu';
+                    // $validationRules['delivery_info.province'] = 'required|string|in:Bagmati';
+                    // $validationRules['delivery_info.phone'] = [
+                    //     'required',
+                    //     'string',
+                    //     'regex:/^(98|97|96)[0-9]{8}$/'
+                    // ];
+                    // $validationRules['delivery_info.landmark'] = 'nullable|string|max:500';
+                }
+
+                // Call the delivery controller method
+                $delivery = $this->deliveryController->createDeliveryForOrder(
+                    $order, 
+                    $validated['delivery_info']
+                );
             }
-
 
             foreach ($validated['items'] as $item) {
                 $product = Product::find($item['product_id']);
@@ -114,15 +129,12 @@ class OrderController extends Controller
                 $discountedPrice = 0;
                 $freebies = 0;
 
-
                 $offer = Offer::where('type', 'product')
                     ->where('product_id', $product->id)
                     ->where('is_active', true)
                     ->where('start_date', '<=', now())
                     ->where('end_date', '>=', now())
                     ->first();
-
-
 
                 if ($offer) {
                     switch ($offer->offer_kind) {
@@ -149,11 +161,9 @@ class OrderController extends Controller
                     $offer->save();
                 }
 
-
                 $orderItem = OrderItem::where('order_id', $order->id)
                     ->where('product_id', $product->id)
                     ->first();
-
 
                 if ($orderItem) {
                     $orderItem->quantity += $item['quantity'];
@@ -171,10 +181,8 @@ class OrderController extends Controller
                         'discount' => $discountedPrice,
                         'grand_total' => $originalPrice - $discountedPrice,
                         'offer_id' => $offer?->id,
-                        
                     ]);
                 }
-
 
                 $product->decrement('stock', $item['quantity']);
                 if ($freebies) {
@@ -183,7 +191,6 @@ class OrderController extends Controller
 
                 $totalAmount += $originalPrice - $discountedPrice;
             }
-
 
             $globalOffer = Offer::where('type', 'global')
                 ->where('is_active', true)
@@ -221,15 +228,12 @@ class OrderController extends Controller
                 'total_amount' => $order->total_amount,
                 'global_discount' => $globalDiscount,
             ], 201);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(string $id)
     {
         if(!$id){
@@ -398,7 +402,6 @@ class OrderController extends Controller
         return response()->json($orders);
     }
 
-
     public function updateOrderStatus(Request $request, $id)
     {
         $validated = $request->validate([
@@ -416,7 +419,7 @@ class OrderController extends Controller
         return response()->json(['message' => 'Order status updated successfully', 'order' => $order]);
     }
 
-   public function getOrderHistory()
+    public function getOrderHistory()
     {
         $user = Auth::user(); 
         if (!$user) {
@@ -442,47 +445,74 @@ class OrderController extends Controller
         ]);
     }
 
-public function getOrderTrack()
-{
-    $user = Auth::user(); 
-   
-    if (!$user) {
+    public function getOrderTrack()
+    {
+        $user = Auth::user(); 
+       
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not logged in'
+            ], 401);
+        }
+
+        // Get the last order of the logged-in user
+        $order = Order::with([
+            'orderItems.product:id,name,price,stock,category_id'
+        ])
+        ->where('user_id', $user->id)
+        ->latest() // order by created_at desc
+        ->first();
+
+        if (!$order) {
+            return response()->json(['message' => 'Order not found'], 404);
+        }
+
         return response()->json([
-            'success' => false,
-            'message' => 'User not logged in'
-        ], 401);
+            'order_id' => $order->id,
+            'table_number' => $order->table_number,
+            'status' => $order->status,
+            'total_amount' => $order->total_amount,
+            'created_at' => $order->created_at->format('Y/m/d H:i'),
+            'order_items' => $order->orderItems->map(function ($item) {
+                return [
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product->name,
+                    'unit_price' => $item->unit_price,
+                    'quantity' => $item->quantity,
+                    'total_product_price' => $item->total_product_price,
+                    'discount' => $item->discount,
+                    'grand_total' => $item->grand_total
+                ];
+            }),
+        ]);
     }
 
-    // Get the last order of the logged-in user
-    $order = Order::with([
-        'orderItems.product:id,name,price,stock,category_id'
-    ])
-    ->where('user_id', $user->id)
-    ->latest() // order by created_at desc
-    ->first();
 
-    if (!$order) {
-        return response()->json(['message' => 'Order not found'], 404);
-    }
 
-    return response()->json([
-        'order_id' => $order->id,
-        'table_number' => $order->table_number,
-        'status' => $order->status,
-        'total_amount' => $order->total_amount,
-        'created_at' => $order->created_at->format('Y/m/d H:i'),
-        'order_items' => $order->orderItems->map(function ($item) {
-            return [
-                'product_id' => $item->product_id,
-                'product_name' => $item->product->name,
-                'unit_price' => $item->unit_price,
-                'quantity' => $item->quantity,
-                'total_product_price' => $item->total_product_price,
-                'discount' => $item->discount,
-                'grand_total' => $item->grand_total
-            ];
-        }),
-    ]);
+
+
+
+    /**
+ * Calculate distance between two coordinates in meters
+ * Using Haversine formula
+ */
+private function calculateDistance($lat1, $lon1, $lat2, $lon2)
+{
+    $earthRadius = 6371000; // Earth's radius in meters
+    
+    // Convert degrees to radians
+    $latFrom = deg2rad($lat1);
+    $lonFrom = deg2rad($lon1);
+    $latTo = deg2rad($lat2);
+    $lonTo = deg2rad($lon2);
+    
+    $latDelta = $latTo - $latFrom;
+    $lonDelta = $lonTo - $lonFrom;
+    
+    $angle = 2 * asin(sqrt(pow(sin($latDelta / 2), 2) +
+        cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)));
+    
+    return $angle * $earthRadius; // Distance in meters
 }
-
 }
